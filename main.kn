@@ -1,0 +1,571 @@
+func main()
+	var smf: @SMF :: @parseSMF("tw008.mid")
+	do cui@print(smf.toStr())
+end func
+
+
+
++func parseSMF(filename: []char): @SMF
+	var parser: @SMFParser :: #@SMFParser
+	ret parser.parse(filename)
+end func
+
+
+
++class MidiData()
+	var _time: int
+	var _status: bit8
+	
+	
+	; +property [read-only]
+	+func time(): int
+		ret me._time
+	end func
+	
+	
+	; +property [read-only]
+	+func status(): bit8
+		ret me._status
+	end func
+	
+	
+	+func setupMidiData(time: int, status: bit8)
+		if(me._status > 0x80b8)
+			ret
+		end if
+		do me._time :: time
+		do me._status :: status
+	end func
+	
+	
+	+*func toStr(): []char
+		var text: []char :: "{ time: \{me._time}, status: \{me._status}, "
+		ret text
+	end func
+end class
+
+
+
++class MidiEvent(@MidiData)
+	var _channel: int
+	var _data1: int
+	var _data2: int
+	
+	
+	*func ctor()
+		do super(me)
+		do me._channel :: -1
+	end func
+	
+	
+	; +property [read-only]
+	+func channel(): int
+		ret me._channel
+	end func
+	
+	
+	; +property [read-only]
+	+func data1(): int
+		ret me._data1
+	end func
+	
+	
+	; +property [read-only]
+	+func data2(): int
+		ret me._data2
+	end func
+	
+	
+	+func setupMidiEvent(channel: bit8, data1: bit8, data2: bit8)
+		if(me._channel > -1)
+			ret
+		end if
+		do me._channel :: channel.and(0x0Fb8) $ int
+		do me._data1 :: data1 $ int
+		do me._data2 :: data2 $ int
+	end func
+	
+	
+	+*func toStr(): []char
+		var text: []char :: super(me)
+		do text :~ "channel: \{me._channel}, data1: \{me._data1}, data2: \{me._data2} }\n"
+		ret text
+	end func
+end class
+
+
+
++class SysExEvent(@MidiData)
+	var _data: []bit8
+	
+	
+	*func ctor()
+		do super(me)
+		do me._data :: #[0]bit8
+	end func
+	
+	
+	; +property [read-only]
+	+func data(): []bit8
+		ret me._data
+	end func
+	
+	
+	+func setupSysExEvent(data: []bit8)
+		if(^me._data > 0)
+			ret
+		end if
+		do me._data :: data
+	end func
+	
+	
+	+*func toStr(): []char
+		var text: []char :: super(me) ~ "SysExEvent:"
+		
+		for i(0, ^me._data - 1)
+			do text :~ " \{me._data[i]}"
+		end for
+		
+		do text :~ " }\n"
+		ret text
+	end func
+end class
+
+
+
++class MetaEvent(@MidiData)
+	var _type: bit8
+	var _data: []bit8
+	
+	
+	*func ctor()
+		do super(me)
+		do me._type :: 0xFFb8
+	end func
+	
+	
+	; +property [read-only]
+	+func numeric(): int
+		var value: bit32
+		for i(0, ^me._data - 1)
+			do value :: value.shl(8).or(me._data[i] $ bit32)
+		end for
+		ret value $ int
+	end func
+	
+	
+	; +property [read-only]
+	+func string(): []char
+		var value: []char :: #[^me._data]char
+		for i(0, ^me._data - 1)
+			do value[i] :: me._data[i] $ char
+		end for
+		ret value
+	end func
+	
+	
+	+func setupMetaEvent(type: bit8, data: []bit8)
+		if(me._type <> 0xFFb8)
+			ret
+		end if
+		do me._type :: type
+		do me._data :: data
+	end func
+	
+	
+	+*func toStr(): []char
+		var text: []char :: super(me)
+		
+		do text :~ me.metaName() ~ ": "
+		
+		for i(0, ^me._data - 1)
+			do text :~ " \{me._data[i]}"
+		end for
+		
+		do text :~ " }\n"
+		ret text
+	end func
+	
+	
+	func metaName(): []char
+		switch(me._type)
+		case 0x00b8
+			ret "Sequence Number"
+			
+		case 0x01b8
+			ret "Text Event"
+			
+		case 0x02b8
+			ret "Copyright Notice"
+			
+		case 0x03b8
+			ret "Sequence/Track Name"
+			
+		case 0x04b8
+			ret "Instrument Name"
+			
+		case 0x05b8
+			ret "Lyrics"
+			
+		case 0x06b8
+			ret "Marker"
+			
+		case 0x07b8
+			ret "Cue point"
+			
+		case 0x08b8
+			ret "Program"
+			
+		case 0x09b8
+			ret "Device"
+			
+		case 0x20b8
+			ret "Channel Prefix"
+			
+		case 0x21b8
+			ret "Port Prefix"
+			
+		case 0x2Fb8
+			ret "End of Track"
+			
+		case 0x51b8
+			ret "Set Tempo"
+			
+		case 0x54b8
+			ret "SMPTE Offset"
+			
+		case 0x58b8
+			ret "Time Signature"
+			
+		case 0x59b8
+			ret "Key Signature"
+			
+		case 0x7Fb8
+			ret "Sequencer-Specific Meta-Event"
+			
+		default
+			ret "---Undefined \{me._type.toStr()} ---"
+		end switch
+	end func
+end class
+
+
+
++class MidiTrack()
+	var _trackID: int
+	var _data: []@MidiData
+	
+	
+	+func setupMidiTrack(trackID: int)
+		do me._trackID :: trackID
+		do me._data :: #[0]@MidiData
+	end func
+	
+	
+	+func add(data: @MidiData)
+		do me._data :~ [data]
+	end func
+	
+	
+	+func last(): @MidiData
+		ret me._data[^me._data - 1]
+	end func
+	
+	
+	+*func toStr(): []char
+		var text: []char :: "@MidiTrack [\{me._trackID}] ----------------\n"
+		
+		for i(0, ^me._data - 1)
+			do text :~ me._data[i].toStr()
+		end for
+		
+		do text :~ "\n"
+		ret text
+	end func
+end class
+
+
+
++class SMF()
+	var _filename: []char
+	var _formatType: int
+	var _trackSize: int
+	var _timeDivision: int
+	
+	var _tracks: []@MidiTrack
+	
+	
+	*func ctor()
+		do me._filename :: ""
+	end func
+	
+	
+	; +property [read-only]
+	+func track(id: int): @MidiTrack
+		ret me._tracks[id]
+	end func
+	
+	
+	; +property [read-only]
+	+func formatType(): int
+		ret me._formatType
+	end func
+	
+	
+	; +property [read-only]
+	+func trackSize(): int
+		ret me._trackSize
+	end func
+	
+	
+	; +property [read-only]
+	+func timeDivision(): int
+		ret me._timeDivision
+	end func
+	
+	
+	+func setupSMF(filename: []char)
+		if(^me._filename > 0)
+			ret
+		end if
+		do me._filename :: filename
+	end func
+	
+	
+	+func setupHeader(formatType: int, trackSize: int, timeDivision: int)
+		if(me._trackSize > 0)
+			ret
+		end if
+		do me._formatType :: formatType
+		do me._trackSize :: trackSize
+		do me._timeDivision :: timeDivision
+		do me.createTracks()
+	end func
+	
+	
+	+func addTrackData(track: int, data: @MidiData)
+		do me._tracks[track].add(data)
+	end func
+	
+	
+	func createTracks()
+		do me._tracks :: #[me._trackSize]@MidiTrack
+		for i(0, me._trackSize - 1)
+			do me._tracks[i] :: #@MidiTrack
+			do me._tracks[i].setupMidiTrack(i)
+		end for
+	end func
+	
+	
+	+*func toStr(): []char
+		var text: []char :: ""
+		do text :~ "@Header ----------------\n"
+		do text :~ "filename      :: \{me._filename}\n"
+		do text :~ "chunk type    :: MThd\n"
+		do text :~ "chunk size    :: 6\n"
+		do text :~ "format type   :: \{me._formatType}\n"
+		do text :~ "track size    :: \{me._trackSize}\n"
+		do text :~ "time division :: \{me._timeDivision}\n"
+		do text :~ "\n"
+		
+		for i(0, ^me._tracks - 1)
+			do text :~ me._tracks[i].toStr()
+		end for
+		
+		ret text
+	end func
+end class
+
+
+
++class SMFParser()
+	
+	const MTHD: int :: 0x4D546864
+	const MTRK: int :: 0x4D54726B
+	
+	const ERR_INVALID_HEADER: int :: 0x00003100
+	const ERR_FORMAT_TYPE: int :: 0x00003101
+	const ERR_INVALID_TRACK_HEADER: int :: 0x00003102
+	const ERR_INVALID_STATUS: int :: 0x00003103
+	const ERR_INVALID_META_EVENT: int :: 0x00003104
+	
+	var _reader: file@Reader
+	
+	var _smf: @SMF
+	
+	+func parse(filename: []char): @SMF
+		do me._reader :: file@makeReader(filename)
+		do me._smf :: #@SMF
+		do me._smf.setupSMF(filename)
+		
+		do me.parseHeader()
+		
+		for i(0, me._smf.trackSize() - 1)
+			do me.parseTrack(i)
+		end for
+		
+		do me._reader.fin()
+		ret me._smf
+	end func
+	
+	
+	func parseHeader()
+		; chunk
+		var chunk: int :: me.castInt(me._reader.read(4))
+		if(chunk <> MTHD)
+			throw ERR_INVALID_HEADER
+		end if
+		
+		; header size
+		var headerSize: int :: me.castInt(me._reader.read(4))
+		if(headerSize <> 6)
+			throw ERR_INVALID_HEADER
+		end if
+		
+		; format
+		var formatType: int :: me.castInt(me._reader.read(2))
+		if(formatType < 0 | formatType > 2)
+			throw ERR_FORMAT_TYPE
+		end if
+		
+		; track size
+		var trackSize: int :: me.castInt(me._reader.read(2))
+		
+		; time division
+		var timeDivision: int :: me.castInt(me._reader.read(2))
+		
+		do me._smf.setupHeader(formatType, trackSize, timeDivision)
+	end func
+	
+	
+	func parseTrack(track: int)
+		; chunk
+		var chunk: int :: me.castInt(me._reader.read(4))
+		if(chunk <> MTRK)
+			throw ERR_INVALID_TRACK_HEADER
+		end if
+		
+		; track size
+		var trackSize: int :: me.castInt(me._reader.read(4))
+		var trackEnd: int :: me._reader.getPos() + trackSize
+		
+		while(me._reader.getPos() < trackEnd)
+			do me.parseMidiEvent(track)
+		end while
+	end func
+	
+	
+	func parseMidiEvent(track: int)
+		var time: int :: me.parseVariableInt()
+		
+		var status: bit8 :: me._reader.read(1)[0]
+		var data1: bit8
+		
+		if(status < 0x80b8)
+			; running status
+			do data1 :: status
+			do status :: me._smf.track(track).last().status()
+		else
+			do data1 :: me._reader.read(1)[0]
+		end if
+		
+		switch(status.and(0xF0b8))
+		case 0x80b8, 0x90b8, 0xA0b8, 0xB0b8, 0xE0b8
+			var event: @MidiData :: me.parse3ByteEvent(status, data1)
+			do event.setupMidiData(time, status)
+			do me._smf.addTrackData(track, event)
+			
+		case 0xC0b8, 0xD0b8
+			var event: @MidiData :: me.parse2ByteEvent(status, data1)
+			do event.setupMidiData(time, status)
+			do me._smf.addTrackData(track, event)
+			
+		case 0xF0b8
+			var event: @MidiData :: me.parseMetaEvent(status, data1)
+			do event.setupMidiData(time, status)
+			do me._smf.addTrackData(track, event)
+			
+		default
+			throw ERR_INVALID_STATUS
+		end switch
+	end func
+	
+	
+	func parse3ByteEvent(status: bit8, data1: bit8): @MidiData
+		var data2: bit8 :: me._reader.read(1)[0]
+		var event: @MidiEvent :: #@MidiEvent
+		do event.setupMidiEvent(status, data1, data2)
+		ret event
+	end func
+	
+	
+	func parse2ByteEvent(status: bit8, data1: bit8): @MidiData
+		var event: @MidiEvent :: #@MidiEvent
+		do event.setupMidiEvent(status, data1, 0x00b8)
+		ret event
+	end func
+	
+	
+	func parseMetaEvent(status: bit8, data1: bit8): @MidiData
+		switch(status)
+		case 0xF0b8, 0xF7b8
+			ret me.parseSysExEvent(status, data1)
+			
+		case 0xFFb8
+			var length: int
+			switch(data1 $ int)
+			case 0x00 to 0x09, 0x20, 0x21, 0x2F, 0x51, 0x54, 0x58, 0x59, 0x7F
+				do length :: me.parseVariableInt()
+				
+			default
+				throw ERR_INVALID_META_EVENT
+			end switch
+			
+			var data: []bit8 :: me._reader.read(length)
+			var event: @MetaEvent :: #@MetaEvent
+			do event.setupMetaEvent(data1, data)
+			ret event
+			
+		default
+			throw ERR_INVALID_STATUS
+		end switch
+	end func
+	
+	
+	func parseSysExEvent(status: bit8, data1: bit8): @MidiData
+		; 1byte戻す
+		do me._reader.setPos(%cur, -1)
+		
+		var length: int :: me.parseVariableInt()
+		var data: []bit8 :: me._reader.read(length)
+		var event: @SysExEvent :: #@SysExEvent
+		do event.setupSysExEvent(data)
+		ret event
+	end func
+	
+	
+	func parseVariableInt(): int
+		var value: bit32
+		
+		while loop(true)
+			var byte: bit8 :: me._reader.read(1)[0]
+			do value :: value.shl(7).or((byte $ bit32).and(0x7Fb32))
+			if(byte < 0x80b8)
+				break loop
+			end if
+		end while
+		
+		ret value $ int
+	end func
+	
+	
+	func castInt(data: []bit8): int
+		var value: bit32
+		
+		for i(0, ^data - 1)
+			do value :: value.shl(8).or(data[i] $ bit32)
+		end for
+		
+		ret value $ int
+	end func
+end class
