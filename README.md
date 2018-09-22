@@ -1,6 +1,8 @@
 # SMF Parser
 SMF(MIDIファイル)解析の練習です！
+
 Qiitaの記事にまとめました。
+
 [KuinでSMF(MIDIファイル)を解析しよう１](https://qiita.com/satonayu/items/422f36df940b4bf9d13b)
 
 
